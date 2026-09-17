@@ -1,1 +1,340 @@
+name: MH Tour V5.3 - Release APK
 
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build MH Tour V5.3 Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # =========================================================
+      # 1. CHECKOUT PROJECT
+      # =========================================================
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+
+      # =========================================================
+      # 2. JAVA 17
+      # =========================================================
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+
+      # =========================================================
+      # 3. GRADLE 8.11.1
+      # =========================================================
+
+      - name: Setup Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+
+      # =========================================================
+      # 4. PERIKSA STRUKTUR PROJECT MH TOUR
+      # =========================================================
+
+      - name: Verify project structure
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "MH TOUR V5.3 - PROJECT CHECK"
+          echo "=========================================="
+
+          test -f android/settings.gradle.kts
+          test -f android/build.gradle.kts
+          test -f android/gradle.properties
+          test -f android/app/build.gradle.kts
+          test -f android/app/src/main/AndroidManifest.xml
+          test -f android/app/src/main/java/com/mhtour/audio/MainActivity.kt
+
+          test -f android/app/src/main/res/drawable/mh_tour_logo.png
+          test -f android/app/src/main/res/drawable/mh_tour_icon.png
+          test -f android/app/src/main/res/drawable/donation_qr.png
+          test -f android/app/src/main/res/drawable/home_reference.webp
+
+          echo ""
+          echo "Project files OK."
+
+          echo ""
+          echo "Memeriksa konfigurasi Android..."
+
+          grep -q 'com.android.application.*8.7.3' \
+            android/build.gradle.kts
+
+          grep -q 'org.jetbrains.kotlin.android.*2.0.21' \
+            android/build.gradle.kts
+
+          grep -q 'compileSdk = 35' \
+            android/app/build.gradle.kts
+
+          grep -q 'minSdk = 26' \
+            android/app/build.gradle.kts
+
+          grep -q 'targetSdk = 35' \
+            android/app/build.gradle.kts
+
+          grep -q 'sourceCompatibility = JavaVersion.VERSION_17' \
+            android/app/build.gradle.kts
+
+          grep -q 'targetCompatibility = JavaVersion.VERSION_17' \
+            android/app/build.gradle.kts
+
+          grep -q 'jvmTarget = "17"' \
+            android/app/build.gradle.kts
+
+          grep -q 'buildConfigField' \
+            android/app/build.gradle.kts
+
+          grep -q 'useLegacyPackaging = true' \
+            android/app/build.gradle.kts
+
+          echo ""
+          echo "Android configuration OK."
+
+          echo ""
+          echo "=========================================="
+          echo "PROJECT CHECK BERHASIL"
+          echo "=========================================="
+
+
+      # =========================================================
+      # 5. BUAT KEYSTORE SEMENTARA
+      # =========================================================
+
+      - name: Create temporary release keystore
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "MEMBUAT RELEASE KEYSTORE"
+          echo "=========================================="
+
+          keytool -genkeypair \
+            -v \
+            -keystore "$RUNNER_TEMP/mh-tour-release.jks" \
+            -storetype JKS \
+            -alias mh-tour-release \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass changeit \
+            -keypass changeit \
+            -dname "CN=MH Tour, OU=Mobile, O=MH Tour, L=Indonesia, ST=West Java, C=ID"
+
+          test -s "$RUNNER_TEMP/mh-tour-release.jks"
+
+          echo ""
+          echo "Keystore berhasil dibuat."
+
+
+      # =========================================================
+      # 6. BUILD RELEASE APK
+      # =========================================================
+
+      - name: Build Release APK
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "BUILD MH TOUR V5.3"
+          echo "=========================================="
+
+          gradle --version
+
+          gradle \
+            --no-daemon \
+            --stacktrace \
+            --warning-mode all \
+            -PMH_KEYSTORE_FILE="$RUNNER_TEMP/mh-tour-release.jks" \
+            -PMH_KEYSTORE_PASSWORD=changeit \
+            -PMH_KEY_ALIAS=mh-tour-release \
+            -PMH_KEY_PASSWORD=changeit \
+            clean \
+            assembleRelease
+
+          echo ""
+          echo "=========================================="
+          echo "GRADLE BUILD SELESAI"
+          echo "=========================================="
+
+
+      # =========================================================
+      # 7. CARI APK HASIL BUILD
+      # =========================================================
+
+      - name: Find Release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "MENCARI APK HASIL BUILD"
+          echo "=========================================="
+
+          echo ""
+          echo "Daftar file APK:"
+
+          find android/app/build/outputs \
+            -type f \
+            -name "*.apk" \
+            -print
+
+          APK_COUNT=$(find android/app/build/outputs \
+            -type f \
+            -name "*.apk" \
+            | wc -l)
+
+          if [ "$APK_COUNT" -eq 0 ]; then
+            echo ""
+            echo "ERROR: APK TIDAK DITEMUKAN!"
+            echo ""
+            echo "Isi folder outputs:"
+            find android/app/build/outputs -type f -print
+            exit 1
+          fi
+
+          APK=$(find android/app/build/outputs \
+            -type f \
+            -name "*.apk" \
+            | head -n 1)
+
+          echo ""
+          echo "APK ditemukan:"
+          echo "$APK"
+
+          test -s "$APK"
+
+          echo ""
+          echo "Ukuran APK:"
+          ls -lh "$APK"
+
+          echo "$APK" > "$GITHUB_WORKSPACE/apk_path.txt"
+
+          echo ""
+          echo "APK berhasil ditemukan."
+
+
+      # =========================================================
+      # 8. PERIKSA SIGNATURE APK
+      # =========================================================
+
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK=$(cat "$GITHUB_WORKSPACE/apk_path.txt")
+
+          echo "=========================================="
+          echo "MEMERIKSA SIGNATURE APK"
+          echo "=========================================="
+
+          APKSIGNER=$(find "$ANDROID_HOME" \
+            -type f \
+            -name "apksigner" \
+            | head -n 1)
+
+          if [ -z "$APKSIGNER" ]; then
+            echo "ERROR: apksigner tidak ditemukan."
+            exit 1
+          fi
+
+          echo "apksigner:"
+          echo "$APKSIGNER"
+
+          "$APKSIGNER" verify --verbose "$APK"
+
+          echo ""
+          echo "=========================================="
+          echo "SIGNATURE APK VALID"
+          echo "=========================================="
+
+
+      # =========================================================
+      # 9. RENAME APK FINAL
+      # =========================================================
+
+      - name: Prepare final APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK=$(cat "$GITHUB_WORKSPACE/apk_path.txt")
+
+          test -s "$APK"
+
+          cp "$APK" "$GITHUB_WORKSPACE/MH-Tour-V5.3.apk"
+
+          test -s "$GITHUB_WORKSPACE/MH-Tour-V5.3.apk"
+
+          echo "=========================================="
+          echo "APK FINAL"
+          echo "=========================================="
+
+          ls -lh "$GITHUB_WORKSPACE/MH-Tour-V5.3.apk"
+
+
+      # =========================================================
+      # 10. UPLOAD APK KE ARTIFACT
+      # =========================================================
+
+      - name: Upload MH Tour V5.3 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MH-Tour-V5.3-Release-APK
+          path: MH-Tour-V5.3.apk
+          if-no-files-found: error
+          retention-days: 30
+
+
+      # =========================================================
+      # 11. BUAT GITHUB RELEASE
+      # =========================================================
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v5.3.0
+          name: MH Tour V5.3
+          generate_release_notes: true
+          body: |
+            # MH Tour V5.3
+
+            Release APK aplikasi MH Tour.
+
+            ## Informasi
+            - Nama: MH Tour
+            - Versi: 5.3
+            - Version Code: 33
+            - Minimum Android: API 26
+            - Target Android: API 35
+            - APK: MH-Tour-V5.3.apk
+
+            ## Build
+            APK dibuat menggunakan:
+            - Android Gradle Plugin 8.7.3
+            - Kotlin 2.0.21
+            - Java 17
+            - Gradle 8.11.1
+
+          files: MH-Tour-V5.3.apk
+          fail_on_unmatched_files: true
